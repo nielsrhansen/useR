@@ -1,0 +1,12 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+ideas.txt
+*.md
+*.html
+*.Rproj
+*.js
+_3d*
+lasso-cache
+lasso-figure

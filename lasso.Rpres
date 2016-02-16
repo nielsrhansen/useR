@@ -1,0 +1,704 @@
+<script type="text/javascript"
+  src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+</script>
+<script>
+  function play1() {
+    var audio = document.getElementById("audio1");
+    audio.play();
+  }
+   function play2() {
+    var audio = document.getElementById("audio2");
+    audio.play();
+  }
+</script>
+
+There is no r in lasso, but plenty of lasso in R!
+========================================================
+author: Niels Richard Hansen
+date: 16/02-2016
+css: CS.css
+transition: none
+transition-speed: fast
+
+```{r packages, echo=FALSE}
+library("glmnet")   ## Lasso via coordinate descent
+library("lars")     ## Lasso via the lar algorithm
+library("msgl")     ## Multinomial sparse group lasso
+library("reshape2") ## For 'melt'
+library("ggplot2")  ## Plotting
+library("lattice")  ## Plotting
+library("rgl")      ## 3d 
+library("misc3d")   ## More 3d 
+```
+
+```{r init, echo=FALSE}
+opts_chunk$set(tidy=FALSE, cache=TRUE, dpi=144, out.height="500px", fig.align="center")
+knit_hooks$set(webgl = hook_webgl)
+options(digits = 4)
+hook_output <- knit_hooks$get("output")
+knit_hooks$set(output = function(x, options) {
+  lines <- options$output.lines
+  if (is.null(lines)) {
+    hook_output(x, options)  # pass to default hook
+  }
+  else {
+    x <- unlist(stringr::str_split(x, "\n"))
+    xx <- character(length(x))
+    lines <- seq_along(x)[lines]
+    gap <- 0
+    j <- k <- 1
+    browser()
+    for(i in seq_along(x)) {
+      if(k <= length(lines) && i == lines[k]) {
+        xx[j] <- x[i]
+        j <- j + 1
+        k <- k + 1
+        gap <- 0
+      } else if(gap == 0) {
+        xx[j] <- "..."
+        j <- j + 1
+        gap <- 1
+      }
+    }
+    # paste these lines together
+    x <- paste(xx[xx != ""], collapse = "\n")
+    hook_output(x, options)
+  }
+})
+```
+
+Lasso
+========================================================
+
+The lasso acronym means
+
+**least absolute shrinkage and selection operator**
+
+and was introduced by Robert Tibshirani in 
+
+[Regression Shrinkage and Selection via the Lasso](http://onlinelibrary.wiley.com/doi/10.1111/j.1467-9868.2011.00771.x/abstract)
+
+published in the first issue of *Journal of the Royal Statistical Society: Series B*, 1996.
+
+Pronunciation
+========================================================
+
+You say las-SOO 
+
+<input type="button" value="UK las-SOO" onclick="play1()" class="btnClass">
+<audio id="audio1" src="http://dictionary.cambridge.org/media/english/uk_pron_ogg/u/ukl/uklar/uklargi023.ogg" ></audio>
+
+
+<div align="center">
+<img src="UKflag.png" style="box-shadow:none" width="256">
+</div>
+
+***
+
+and I say LAs-so.
+
+<input type="button" value="US LAs-so" onclick="play2()" class="btnClass">
+<audio id="audio2" src="http://dictionary.cambridge.org/media/english/us_pron_ogg/l/las/lasso/lasso.ogg" ></audio>
+
+<div align="center">
+<img src="USflag.jpg" style="box-shadow:none" width="256">
+</div>
+
+From Spanish *lazo*.
+
+Setup
+========================================================
+incremental: true
+
+We consider linear regression models of a response $Y$ on a vector 
+$X = (X_1, \ldots, X_p)$
+of predictors: 
+$$E(Y) = \mathbf{X}^T \beta= \sum_{j=1}^p X_j \beta_j.$$
+
+With $n$ observations we organize $Y_1, \ldots, Y_n$ in a vector $\mathbf{Y}$
+and $X_1, \ldots, X_n$ in a $n \times p$ matrix $\mathbf{X}$. 
+
+The <font color="red">least squares estimator</font> is 
+$$\hat{\beta} = \mathop{\arg \min}\limits_{\beta} \|\mathbf{Y} - \mathbf{X}\beta\|_2^2 
+= \mathop{\arg \min}\limits_{\beta} \sum_{i=1}^n (Y_i - X_i^T \beta)^2.$$
+where $\|\mathbf{z}\|_2^2 = \sum_{i=1}^n z_i^2$ denotes the Euclidean norm. 
+
+
+Prostate cancer data example
+========================================================
+
+* lpsa: log(prostate specific antigen)
+* lcavol: log(cancer volume) 
+* lweight: log(prostate weight)
+* age: age of patient
+* lbph: log(benign prostatic hyperplasia amount)
+* svi: seminal vesicle invasion
+* lcp: log(capsular penetration)
+* gleason: gleason score
+* pgg45: percent gleason scores 4 and 5
+
+
+Prostate cancer data example
+========================================================
+incremental: true
+
+The response, $Y$, will be *lpsa*. The remaining 8 variables will be the predictors in $X$.
+
+```{r prostateData, echo = FALSE}
+prostate <- read.table("prostate.data.txt")[, c(9, 1:8)]
+head(prostate, 4)
+```
+
+All variables are standardized upfront.
+
+```{r scale}
+prostate <- scale(prostate, TRUE, TRUE)
+```
+
+
+Spearman correlations
+========================================================
+
+```{r spearman, echo=FALSE, fig.height=9, fig.width=9, out.height="650px"}
+cp <- cor(data.matrix(na.omit(prostate)), method = "spearman")
+ord <- rev(hclust(as.dist(1 - abs(cp)))$order)
+colPal <- colorRampPalette(c("blue", "yellow"), space = "rgb")(100)
+
+levelplot(cp[ord, ord],
+          xlab = "",
+          ylab = "",
+          col.regions = colPal,
+          at = seq(-1, 1, length.out = 100),
+          colorkey = list(space = "top", labels = list(cex = 2.5)),
+          scales = list(x = list(rot = 45),
+                        y = list(draw = FALSE),
+              cex = 2.5)
+)
+```
+
+
+A linear model
+========================================================
+
+```{r prostateLm, output.lines = -(1:8)}
+## Intercept removed due to standardization
+prostateLm <- lm(lpsa ~ . - 1, 
+                 data = as.data.frame(prostate))
+summary(prostateLm)
+```
+
+
+A lasso fit using glmnet
+========================================================
+
+```{r prostateLasso, fig.height=5, fig.width=6}
+prostateLasso <- glmnet(x = prostate, y = prostate[, "lpsa"], 
+                        exclude = 1, intercept = FALSE)
+plot(prostateLasso, label = TRUE, lwd = 2)
+```
+
+
+A lasso fit from Tibshirani's paper
+========================================================
+
+![Tib's figure](figTibs.png)
+
+What is lasso?
+========================================================
+incremental: true
+
+Lasso is a regression technique that gives a family of coefficients
+$({}^{s \!}\beta)_{s \geq 0}$ indexed by a tuning parameter $s \geq 0$. 
+
+* For $s \nearrow s_{\mathrm{max}}$ it holds that ${}^{s \!}\beta \to \hat{\beta}$ (a least squares estimate).
+* For $s < s_{\mathrm{max}}$ the estimate ${}^{s \!}\beta_i$ is 
+<font color="red">shrunk</font> toward 0 compared to $\hat{\beta}_i$.
+* For small enough $s$ some coefficients are shrunk all the way to 0. 
+This gives lasso the <font color="red">selection</font> property.
+
+
+L1-constrained regression
+========================================================
+
+```{r 3dball, echo=FALSE, webgl=TRUE, cache=TRUE, dpi=72}
+mynorm <- function(x, y, z, gamma = 1) abs(x)^gamma + abs(y)^gamma + abs(z)^gamma
+xyz <- seq(-2, 2, 0.1)
+val <- misc3d:::fgrid(mynorm, xyz, xyz, xyz)
+x0 <- c(1.3, 0.8, 0.4)
+z <- ((x0[1] - x0[2]) + 1) / 2
+px0 <- c(z, 1 - z, 0)
+contour3d(val, level = 1, color = "darkolivegreen3", light = c(0, 0, 4, 0.8), 
+          shininess = 80, specular = "lightblue", 
+          x = xyz, y = xyz, z = xyz)
+rgl.viewpoint(theta = 50, phi = 20, zoom = 0.65)
+lines3d(c(-1.5, 1.5), c(0, 0), c(0, 0))
+lines3d(c(0, 0), c(-1.5, 1.5), c(0, 0))
+lines3d(c(0, 0), c(0, 0), c(-1.5, 1.5))
+spheres3d(x0[1], x0[2], x0[3], radius = 0.05, color = "dodgerblue2")
+spheres3d(px0[1], px0[2], px0[3], radius = 0.05, color = "dodgerblue2")
+lines3d(c(px0[1], x0[1]), c(px0[2], x0[2]), c(px0[3], x0[3]), color = "dodgerblue2", lwd = 3)
+```
+
+***
+
+<div align="center">
+  <img src="spinBall.gif" style="box-shadow:none" width="250" height="250">
+</div>
+  
+$$
+  {}^{1 \!}\hat{\beta} = \mathop{\arg \min}\limits_{\beta: \|\beta\|_1 \leq 1} 
+\| \mathbf{Y} - \mathbf{X} \beta \|^2_2.
+$$
+  
+ where 
+$$\|\beta\|_1 = \sum_{i=1}^p |\beta_i|$$
+  
+  
+L1-constrained regression
+========================================================
+  
+
+```{r 3dballcut, echo=FALSE, webgl=TRUE, cache=TRUE, dpi=72}
+x <- seq(0, 2, 0.1)
+val <- misc3d:::fgrid(mynorm, x, xyz, xyz)
+px1 <- c(0.5, 0, 0)
+a <- (1.5 - x0[2] - x0[3] + 2 * x0[1]) / 3 
+b <- (1.5 - x0[1] - x0[3] + 2 * x0[2]) / 3 
+px2 <- c(a, b, 1.5 - a - b)
+contour3d(val, level = c(0.5, 1, 1.5), color = c("darkolivegreen4", "darkolivegreen3", "darkolivegreen2"),
+          alpha = 0.5, light = c(0, 0, 4, 0.8), 
+          shininess = 80, specular = "lightblue", 
+          x = x, y = xyz, z = xyz)
+rgl.viewpoint(theta = 50, phi = 10, zoom = 0.65)
+lines3d(c(-1.5, 1.5), c(0, 0), c(0, 0))
+lines3d(c(0, 0), c(-1.5, 1.5), c(0, 0))
+lines3d(c(0, 0), c(0, 0), c(-1.5, 1.5))
+spheres3d(x0[1], x0[2], x0[3], radius = 0.05, color = "dodgerblue2")
+spheres3d(px0[1], px0[2], px0[3], radius = 0.05, color = "dodgerblue2")
+lines3d(c(px0[1], x0[1]), c(px0[2], x0[2]), c(px0[3], x0[3]), color = "dodgerblue2", lwd = 3)
+spheres3d(px1[1], px1[2], px1[3], radius = 0.05, color = "dodgerblue2")
+lines3d(c(px1[1], x0[1]), c(px1[2], x0[2]), c(px1[3], x0[3]), color = "dodgerblue2", lwd = 3)
+spheres3d(px2[1], px2[2], px2[3], radius = 0.05, color = "dodgerblue2")
+lines3d(c(px2[1], x0[1]), c(px2[2], x0[2]), c(px2[3], x0[3]), color = "dodgerblue2", lwd = 3)
+```
+
+***
+
+<div align="center">
+  <img src="cutSpinBall.gif" style="box-shadow:none" width="250" height="250">
+</div>
+  
+$$
+  {}^{s \!}\hat{\beta} = \mathop{\arg \min}\limits_{\beta: \|\beta\|_1 \leq s} 
+\| \mathbf{Y} - \mathbf{X} \beta \|^2_2.
+$$
+
+Lasso defines a family of estimates.
+
+The penalized version of lasso
+========================================================
+incremental: true
+
+$$\beta^{\lambda} = \mathop{\arg \min}\limits_{\beta} 
+\| \mathbf{Y} - \mathbf{X} \beta \|^2_2 + \lambda  \|\beta\|_1.$$
+
+The monotonely decreasing <font color="red">data dependent</font> map <br> <br>
+$$s(\lambda) = \|\beta^{\lambda}\|_1$$ <br>
+from $(0,\infty)$ to $(0, s_{\mathrm{max}})$ gives the relation <br> <br>
+$$\beta^{\lambda} = {}^{s(\lambda) \!}\beta$$ <br>
+between the contrained lasso and the penalized lasso.
+
+Soft thresholding
+========================================================
+incremental: true
+
+If $\mathbf{X}$ is orthogonal, i.e. $\mathbf{X}^T \mathbf{X} = \mathbf{I}_p$, then 
+$$\beta_i^{\lambda} = \mathrm{sign}(\hat{\beta}_i) \max\{|\hat{\beta}_i| - \lambda, 0\}$$
+is <font color="red">soft thresholding</font> of the least squares estimator.
+
+This can be compared to hard thresholding 
+$$\hat{\beta}_i 1(|\hat{\beta}_i| > \lambda)$$
+
+and <font color="red">linear</font> shrinkage 
+$$\frac{\hat{\beta}_i}{1 + \lambda}$$
+related to ridge regression.
+
+
+Soft thresholding (\(\lambda = 1\))
+========================================================
+
+```{r lambda, echo=FALSE}
+lambda <- 1
+x <- seq(-3, 3, 0.01)
+```
+
+
+```{r threshold, echo=FALSE, fig.width=5, fig.height=4}
+thres <- data.frame(
+  x = x,
+  soft = sign(x) * pmax((abs(x) - lambda), 0),
+  hard = x * (abs(x) > lambda),
+  ridge = x / (1 + lambda)
+)
+ggplot(data = melt(thres, id.vars = "x"), 
+      aes(x, value, color = variable)) +
+  scale_color_discrete("Method") + 
+  geom_abline(slope = 1, linetype = 2) +
+  geom_line(size = 2) +
+  ylab("Shrunken fit")
+```
+
+
+Soft thresholding (\(\lambda = 1.5\))
+========================================================
+
+```{r lambda2, echo=FALSE}
+lambda <- 1.5
+```
+
+
+```{r threshold2, echo=FALSE, ref.label="threshold", fig.width=5, fig.height=4}
+```
+
+
+
+Inspiration and related early work
+========================================================
+incremental: true
+
+* [Ideal spatial adaptation by wavelet shrinkage](http://biomet.oxfordjournals.org/content/81/3/425.short?rss=1&ssource=mfr) by Donoho 
+and Johnstone, 1994, introduced soft thresholding for shrinkage of wavelet coefficients.
+* [Better Subset Regression Using the Nonnegative Garrote](http://www.jstor.org/stable/1269730) by 
+Breiman, 1995, was a direct inspiration for Tibshirani.
+* [A Statistical View of Some Chemometrics Regression Tools](http://www.jstor.org/stable/1269656), Frank 
+and Friedman, 1993, proposed the <font color="red">bridge</font> penalty
+$$\mathrm{pen}(\beta) = \sum_{i=1}^p |\beta_i|^{\gamma}$$
+as a generalization of ridge regression ($\gamma = 2$). They did not suggest algorithms.
+
+
+
+Computing the lasso solution
+========================================================
+incremental: true
+
+Lasso is for fixed $s$ the solution of a quadratic optimization problem with $2^p$ linear 
+inequality contraints.
+
+Tibshirani proposed an interative algorithm for adding active contraints. It 
+requires the sequential solution of quadractic optimization problems with linear 
+inequality contraints. 
+
+Tibshirani implemented public domain functions for S-PLUS. 
+
+<small>
+"*To obtain them, use file transfer protocol to 
+lib.stat.cmu.edu and retrieve the file S/lasso, or send an electronic 
+mail message to statlib@lib.stat.cmu.edu with the message
+send lasso from S.*"
+</small>
+
+The LARS algorithm
+========================================================
+incremental: true
+
+Homotopy methods as in [On the LASSO and its Dual](http://www.tandfonline.com/doi/pdf/10.1080/10618600.2000.10474883), Osborne, Presnell
+and Turlach, 2000, JCGS, compute the entire solution path 
+$$\lambda \mapsto \beta^{\lambda}.$$
+
+The <font color="red">least angle regression</font> (LAR) and its lasso modification (LARS)
+was developed by Efron et al., and is a fast homotopy algorithm. 
+
+```{r lars}
+prostateLars <- lars(x = prostate[, -1], y = prostate[, "lpsa"], 
+                     intercept = FALSE, normalize = FALSE)
+```
+
+This is a pure R implementation!
+
+The LARS fit
+========================================================
+
+```{r larsPlot, fig.height=5, fig.width=6}
+plot(prostateLars)
+```
+
+
+The LARS fit
+========================================================
+
+```{r larsCoefpring, eval=FALSE}
+coefficients(prostateLars)
+```
+
+
+```{r larsCoef, echo=FALSE}
+options(digits = 3)
+coefficients(prostateLars)
+options(digits = 4)
+```
+
+
+Elements of Statistical Learning (ESL)
+========================================================
+
+<br> 
+<div align="center">
+  <a href="http://statweb.stanford.edu/~tibs/ElemStatLearn/">
+  <img src="CoverII_small.jpg" style="box-shadow:none" width="350" height="800">
+  </a>
+</div>
+
+***
+
+<br>
+
+<div align="center">
+  
+  <img src="hastie.jpg" width="160" style="margin: 25px 30px">
+  <img src="rob.jpg" width="160">
+  
+</div>
+
+<div align="center">
+  <img src="jerome.jpg" style="box-shadow:none" width="180">
+</div>
+
+History
+========================================================
+incremental: true
+
+* ESL first edition was published in 2001.
+* The [lars package](https://cran.r-project.org/web/packages/lars/index.html) 
+(a path algorithm) was available from CRAN in May 2003.
+* I read ESL in 2004 and gave a course at UCPH.
+* [Least Angle Regression](http://projecteuclid.org/euclid.aos/1083178935) with 
+the LARS algorithm was published in 2004.
+* The [glmnet package](https://cran.r-project.org/web/packages/glmnet/index.html) 
+(cyclic coordinatewise descent) was available from CRAN
+in June 2008.
+* ESL second edition was published in 2009 introducing me to *elastic net* and
+the glmnet package.
+* [An Introduction to Statistical Learning](http://link.springer.com/book/10.1007%2F978-1-4614-7138-7) 
+*with applications in R* by James, Witten, Hastie and Tibshirani was published in 2013.
+
+Coordinate descent
+========================================================
+incremental: true
+
+The coordinate descent algorithm solves the lasso optimization problem 
+very efficiently.
+
+* Wenjiang Fu proposed in [Penalized regressions: the bridge versus the lasso ](http://dx.doi.org/10.2307/1390712) (1998) his "shooting algorithm".
+* The use of coordinate descent was neglected for a period.
+* Friedman was external examiner in 2006 on a PhD by Anita van der Kooij, 
+who used coordinate descent, and the algorithm was taken up again.
+* Hastie says that efficiency of glmnet is due to FFT<sup>1)</sup>.
+* FFT = Friedman + Fortran + Tricks.
+
+<small>
+1) If you don't get the joke look up the fast Fourier transform.
+</small>
+
+
+Impact
+========================================================
+
+<div align="center">
+  <img src="citations.png" width="750px">
+</div>
+
+<small>
+From P. Bühlmann's discussion of R. Tibshirani, [Regression shrinkage and selection via the lasso: a retrospective](http://onlinelibrary.wiley.com/doi/10.1111/j.1467-9868.2011.00771.x/abstract),
+JRSSB, 2011.
+</small>
+
+
+Prediction of tumor site
+========================================================
+
+<div align="center">
+  <img src="Table.png" style="box-shadow:none" width="700">
+</div>
+
+<small>
+From Vincent et al., [Modeling tissue contamination to improve molecular identification of the primary tumor site of metastases](http://bioinformatics.oxfordjournals.org/content/30/10/1417), Bioinformatics, 2013.
+</small>
+
+Multinomial lasso
+========================================================
+
+The squared error loss is replaced by the negative log-likelihood: 
+
+$$\beta^{\lambda} = \mathop{\arg \min}\limits_{\beta} 
+\ell(\beta) + \lambda  \|\beta\|_1$$
+
+With $K$ groups and $p$ predictors there will be $Kp$ parameters.
+
+In the example we have $K = 9$ and $p = 384$ giving 3456 parameters.
+
+Multinomial lasso with glmnet
+========================================================
+
+```{r miRNAlasso, fig.keep="none"}
+load("miRNA.RData")
+miRNAlasso <- glmnet(Xprim, Yprim, family = "multinomial")
+plot(miRNAlasso)
+```
+
+```{r, echo=FALSE, fig.height=5, fig.width=7}
+par(mfcol = c(3, 3), mar = c(3, 4, 3, 2))
+plot(miRNAlasso)
+```
+
+
+
+Cross-validation with glmnet
+========================================================
+```{r miRNAcv, fig.height=5, fig.width=7}
+miRNAlasso <- cv.glmnet(Xprim, Yprim, family = "multinomial", 
+                        type.measure = "class")
+plot(miRNAlasso, ylim = c(0, 0.4))
+```
+
+
+Group lasso
+========================================================
+
+
+<div align="center">
+  <img src="spinBallone.gif" style="box-shadow:none" width="450" height="450">
+</div>
+
+Ordinary lasso penalty  
+
+***
+
+<div align="center">
+  <img src="spinBallgroup.gif" style="box-shadow:none" width="450" height="450">
+</div>
+  
+Group lasso penalty
+  
+Sparse group lasso
+========================================================
+
+<div align="center">
+  <img src="spinBallgroup.gif" style="box-shadow:none" width="450" height="450">
+</div>
+
+Group lasso penalty
+
+***
+
+<div align="center">
+  <img src="spinBallsparsegroup.gif" style="box-shadow:none" width="450" height="450">
+</div>
+  
+Sparse group lasso penalty
+
+
+Sparse group lasso
+========================================================
+
+The (default) sparse group lasso penalty for multinomial lasso is defined as
+$$
+\begin{aligned}
+\mathrm{Pen}(\beta) & = \alpha \sum_{k,j} |\beta_{kj}| + 
+(1-\alpha) \sum_{k=1}^M \gamma_k \sqrt{\sum_{j=1}^p \beta_{kj}^2} \\
+& = \alpha \|\beta\|_1 + (1-\alpha) \sum_{k=1}^M \gamma_k \|\beta_{k\cdot}\|_2 
+\end{aligned}
+$$
+for $\alpha \in [0,1]$. The value of $\alpha = 1$ gives lasso and $\alpha = 0$ gives 
+group lasso. 
+
+<small>
+The group lasso gives that the parameters associated with a feature are 
+either all 0 or all different from 0. The sparse group lasso encourages 
+a group selection, but allows for selection of only some parameters associated
+with a predictor. 
+</small>
+
+The msgl package (\(\alpha = 0.5\), the default)
+========================================================
+
+```{r miRNAmsgl, warning=FALSE, message=FALSE, results="hide"}
+lambda <- msgl.lambda.seq(Xprim, Yprim, lambda.min = 0.01)
+miRNAmsgl <- msgl.cv(Xprim, Yprim, lambda = lambda)
+```
+
+```{r miRNAplot, echo=FALSE, dependson="miRNAmsgl", fig.height=5, fig.width=7}
+err <- colSums(miRNAmsgl$classes != Yprim) / length(Yprim)
+plot(x = log(lambda), y = err, col = "red", 
+     cex = 1, pch = 19, ylim = c(0, 0.4), ylab = "Misclassification error")
+```
+
+The msgl package (\(\alpha = 0\), group lasso)
+========================================================
+
+```{r miRNAmsgl2, warning=FALSE, message=FALSE, results="hide"}
+lambda <- msgl.lambda.seq(Xprim, Yprim, alpha = 0, lambda.min = 0.01)
+miRNAmsgl <- msgl.cv(Xprim, Yprim, lambda = lambda, alpha = 0)
+
+```
+
+```{r miRNAplot2, echo=FALSE, dependson="miRNAmsgl", fig.height=5, fig.width=7}
+err <- colSums(miRNAmsgl$classes != Yprim) / length(Yprim)
+plot(x = log(lambda), y = err, col = "red", 
+     cex = 1, pch = 19, ylim = c(0, 0.4), ylab = "Misclassification error")
+```
+
+The msgl package 
+========================================================
+
+The R package msgl implements sparse group lasso for multinomial models.
+
+It supports the default grouping of all parameters associated with one predictor,
+and it supports user defined groups of predictors.
+
+The glmnet supports group lasso for multinomial models with the default grouping
+but not sparse group lasso or grouping of predictors. 
+
+Multinomial group lasso with glmnet
+========================================================
+
+```{r miRNAcvmult, fig.height=5, fig.width=7}
+miRNAlasso <- cv.glmnet(Xprim, Yprim, family = "multinomial", 
+                        type.measure = "class", 
+                        type.multinomial = "grouped")
+plot(miRNAlasso, ylim = c(0, 0.4))
+```
+
+Professional R users
+========================================================
+incremental: true
+
+A professional cowboy recognizes the layman by his usage of the word *lasso*.
+
+To the cowboy it is simply the rope.
+
+My next cool statistical method has to be called **Rope**.
+
+The is R in **Rope**, and, hopefully, the professional R users will 
+recognize the layman by his usage of lasso - once we have **Rope**!
+
+Thanks!
+
+Packages
+========================================================
+
+The packages used explicitly in the presentation:
+
+```{r, ref.label="packages"}
+
+```
+
+Other packages worth mentioning:
+
+```{r packages2}
+library("LiblineaR")  ## Fast logistic lasso etc.
+library("grpreg")     ## Group lasso etc.
+library("glamlasso")  ## Lasso for array models
+```
+
+
+

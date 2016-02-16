@@ -1,0 +1,17 @@
+.reveal pre code {
+  font-size: 1.1em;
+}
+
+.reveal .slides section .mediaInline img {
+  display: block;
+  margin: auto;
+}
+
+.reveal .slides section .mediaOnly img {
+  display: block;
+  margin: auto;
+}
+
+.btnClass {
+  font-size: 24px;
+}  
