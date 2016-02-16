@@ -530,7 +530,7 @@ Multinomial lasso
 The squared error loss is replaced by the negative log-likelihood: 
 
 $$\beta^{\lambda} = \mathop{\arg \min}\limits_{\beta} 
-\ell(\beta) + \lambda  \|\beta\|_1$$
+\ell(\beta) + \lambda  \|\beta\|_1.$$
 
 With $K$ groups and $p$ predictors there will be $Kp$ parameters.
 
@@ -612,7 +612,7 @@ for $\alpha \in [0,1]$. The value of $\alpha = 1$ gives lasso and $\alpha = 0$ g
 group lasso. 
 
 <small>
-The group lasso gives that the parameters associated with a feature are 
+The group lasso gives parameters associated with a predictor that are 
 either all 0 or all different from 0. The sparse group lasso encourages 
 a group selection, but allows for selection of only some parameters associated
 with a predictor. 
@@ -636,7 +636,8 @@ The msgl package (\(\alpha = 0\), group lasso)
 ========================================================
 
 ```{r miRNAmsgl2, warning=FALSE, message=FALSE, results="hide"}
-lambda <- msgl.lambda.seq(Xprim, Yprim, alpha = 0, lambda.min = 0.01)
+lambda <- msgl.lambda.seq(Xprim, Yprim, alpha = 0, 
+                          lambda.min = 0.01)
 miRNAmsgl <- msgl.cv(Xprim, Yprim, lambda = lambda, alpha = 0)
 
 ```
@@ -678,7 +679,7 @@ To the cowboy it is simply the rope.
 
 My next cool statistical method has to be called **Rope**.
 
-The is R in **Rope**, and, hopefully, the professional R users will 
+There is R in **Rope**, and, hopefully, the professional R users will 
 recognize the layman by his usage of lasso - once we have **Rope**!
 
 Thanks!
