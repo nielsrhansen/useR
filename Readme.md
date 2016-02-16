@@ -1,12 +1,14 @@
-Copenhagen useR presentation R code
-===================================
+Copenhagen useR presentation
+============================
 
-[February 16, 2016.](http://www.meetup.com/CopenhagenR-useR-Group/events/228068415/)
+R code from the Copenhagen useR meeting, February 16, 2016:
+
+[There is no r in lasso, but plenty of lasso in R!](http://www.meetup.com/CopenhagenR-useR-Group/events/228068415/)
 
 See the final [presentation](http://nielsrhansen.github.io/useR/lasso.html) for the result. 
 
-The code for the presentation is an 
-R presentation for RStudio, which generates a HTML presentation.
+The code for the presentation is
+lasso.Rpres for RStudio, which generates an HTML presentation.
 
 The `movie.R` file generates the gif animations.
 
